@@ -1,6 +1,7 @@
 {
+  "liveServer.settings.port": 5500,
+  "liveServer.settings.root": "/",
   "liveServer.settings.proxy": {
-    "^/api": "http://127.0.0.1:5000",
-    "^/images": "http://127.0.0.1:5000"
+    "enable": false
   }
 }

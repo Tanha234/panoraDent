@@ -1,0 +1,12 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: Viewer Backend",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/viewer_server.py",
+      "console": "integratedTerminal"
+    }
+  ]
+}

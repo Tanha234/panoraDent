@@ -6,6 +6,8 @@
   <title>DentAI Dataset Viewer</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <!-- Static dataset bundle: enables instant viewing with Live Server, file://, or any web server -->
+  <script src="dataset.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -290,7 +292,11 @@
 
 <script>
 // ── Constants ───────────────────────────────────────────────────────────────
-const BASE_URL = 'http://127.0.0.1:5000';
+// Optional Flask backend URL (only needed if dataset.js is not present)
+const BASE_URL = (window.location.port === '5500' || window.location.protocol === 'file:')
+  ? `${window.location.protocol === 'file:' ? 'http:' : window.location.protocol}//${window.location.hostname || '127.0.0.1'}:5000`
+  : window.location.origin;
+
 const CLASS_NAMES = [
   'Attrition','Cyst','Dental Caries','Endodontically Treated Tooth',
   'Impacted Third Molar','Missing Tooth','Periapical Abnormality',
@@ -300,6 +306,24 @@ const CLASS_COLORS = [
   '#f43f5e','#fb923c','#facc15','#4ade80','#22d3ee',
   '#818cf8','#c084fc','#f472b6','#34d399','#60a5fa','#fbbf24'
 ];
+
+// Helper to normalize box format: accepts [cid, cx, cy, w, h] or {class_id, ...}
+function formatBox(b) {
+  if (Array.isArray(b)) {
+    const cid = b[0];
+    return {
+      class_id: cid,
+      class_name: CLASS_NAMES[cid] || `Class ${cid}`,
+      cx: b[1], cy: b[2], w: b[3], h: b[4]
+    };
+  }
+  return b;
+}
+
+// Resolve image URL (works natively with Live Server, static servers, and file://)
+function getImgSrc(split, name) {
+  return `${split}/images/${encodeURIComponent(name)}`;
+}
 
 // ── State ────────────────────────────────────────────────────────────────────
 const S = {
@@ -348,13 +372,45 @@ function changeSplit(s) {
 
 async function loadSplit(split) {
   showLoading(true);
-  const r = await fetch(BASE_URL + `/api/images?split=${split}`);
-  const d = await r.json();
-  S.images = d.images;
-  S.index  = 0;
-  document.getElementById('total-count').textContent = d.count;
 
-  if (d.count === 0) {
+  // 1. Ensure DATASET is ready (fallback to fetch dataset.json if dataset.js wasn't loaded)
+  if (!window.DATASET) {
+    try {
+      const res = await fetch('dataset.json');
+      if (res.ok) {
+        window.DATASET = await res.json();
+      }
+    } catch(e) {}
+  }
+
+  let images = [];
+
+  // Use static dataset if present
+  if (window.DATASET && window.DATASET[split]) {
+    images = window.DATASET[split].images || [];
+    // Pre-populate label cache
+    const lblMap = window.DATASET[split].labels || {};
+    for (const [imgName, rawBoxes] of Object.entries(lblMap)) {
+      S.labelCache[split + '/' + imgName] = rawBoxes.map(formatBox);
+    }
+  } else {
+    // Backend API fallback
+    try {
+      const r = await fetch(BASE_URL + `/api/images?split=${split}`);
+      if (r.ok) {
+        const d = await r.json();
+        images = d.images || [];
+      }
+    } catch(e) {
+      console.warn('API fallback failed:', e);
+    }
+  }
+
+  S.images = images;
+  S.index  = 0;
+  document.getElementById('total-count').textContent = images.length;
+
+  if (images.length === 0) {
     ph.style.display = 'flex';
     canvas.style.display = 'none';
     showLoading(false);
@@ -363,13 +419,16 @@ async function loadSplit(split) {
   ph.style.display = 'none';
   canvas.style.display = 'block';
 
-  // Pre-fetch labels for first batch
-  await prefetchLabels(split, 0, Math.min(10, d.count));
+  // If using backend without pre-cached labels, prefetch first batch
+  if (!window.DATASET) {
+    await prefetchLabels(split, 0, Math.min(10, images.length));
+  }
   await showImage(0);
 }
 
-// ── Label prefetch (batch API) ───────────────────────────────────────────────
+// ── Label prefetch (batch API fallback) ─────────────────────────────────────
 async function prefetchLabels(split, startIdx, endIdx) {
+  if (window.DATASET) return;
   const names = [];
   for (let i = startIdx; i < endIdx; i++) {
     const key = split + '/' + S.images[i];
@@ -384,7 +443,7 @@ async function prefetchLabels(split, startIdx, endIdx) {
     });
     const data = await r.json();
     for (const [name, boxes] of Object.entries(data))
-      S.labelCache[split + '/' + name] = boxes;
+      S.labelCache[split + '/' + name] = (boxes || []).map(formatBox);
   } catch(e) { /* ignore */ }
 }
 
@@ -393,7 +452,7 @@ function preloadImg(split, name) {
   const key = split + '/' + name;
   if (S.imgCache[key]) return S.imgCache[key];
   const img = new Image();
-  img.src = BASE_URL + `/images/${split}/${name}`;
+  img.src = getImgSrc(split, name);
   S.imgCache[key] = img;
   return img;
 }
@@ -406,7 +465,7 @@ function triggerPreload(idx) {
   // Preload behind (1)
   if (idx > 0) preloadImg(sp, S.images[idx - 1]);
 
-  // Prefetch labels for next batch
+  // Prefetch labels for next batch if on backend
   const end = Math.min(idx + PRELOAD_AHEAD + 1, S.images.length);
   prefetchLabels(sp, idx, end);
 
@@ -458,24 +517,32 @@ async function showImage(idx) {
   const alreadyLoaded = img.complete && img.naturalWidth > 0;
   if (!alreadyLoaded) {
     showLoading(true);
-    await new Promise((res, rej) => {
-      img.onload  = res;
-      img.onerror = rej;
+    await new Promise((res) => {
+      img.onload  = () => res();
+      img.onerror = () => {
+        console.warn('Failed to load image:', img.src);
+        res();
+      };
     });
   }
   S.currentImg = img;
 
-  // Get labels (from cache or fetch)
+  // Get labels (from cache or static DATASET or fetch)
   let boxes = S.labelCache[key];
   if (boxes === undefined) {
-    try {
-      const r = await fetch(BASE_URL + `/api/labels?split=${S.split}&image=${encodeURIComponent(name)}`);
-      const d = await r.json();
-      boxes = d.boxes;
+    if (window.DATASET && window.DATASET[S.split]?.labels?.[name]) {
+      boxes = (window.DATASET[S.split].labels[name] || []).map(formatBox);
       S.labelCache[key] = boxes;
-    } catch(e) { boxes = []; }
+    } else {
+      try {
+        const r = await fetch(BASE_URL + `/api/labels?split=${S.split}&image=${encodeURIComponent(name)}`);
+        const d = await r.json();
+        boxes = (d.boxes || []).map(formatBox);
+        S.labelCache[key] = boxes;
+      } catch(e) { boxes = []; }
+    }
   }
-  S.boxes = boxes;
+  S.boxes = boxes || [];
 
   showLoading(false);
   drawCanvas();
@@ -484,8 +551,8 @@ async function showImage(idx) {
   // Fire preload for neighbours
   triggerPreload(idx);
 
-  document.getElementById('img-w').textContent = img.naturalWidth;
-  document.getElementById('img-h').textContent = img.naturalHeight;
+  document.getElementById('img-w').textContent = img.naturalWidth || '—';
+  document.getElementById('img-h').textContent = img.naturalHeight || '—';
 }
 
 // ── Canvas draw ───────────────────────────────────────────────────────────────
