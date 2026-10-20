@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 11
+names: ['Attrition', 'Cyst', 'Dental Caries', 'Endodontically Treated Tooth', 'Impacted Third Molar', 'Missing Tooth', 'Periapical Abnormality', 'Periapical Lesion', 'Periodontal Pocket', 'Retained Root', 'Tooth Fracture']
+
+roboflow:
+  workspace: nusrath-islam
+  project: dentai-ys0aw
+  version: 3
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/nusrath-islam/dentai-ys0aw/dataset/3
