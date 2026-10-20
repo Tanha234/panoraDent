@@ -7,7 +7,7 @@
 <title>DentAI Dataset Viewer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-<script src="/dataset.js"></script>
+<script src="dataset.js"></script>
 
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -140,7 +140,11 @@ header{display:flex;align-items:center;justify-content:space-between;gap:16px;pa
       <button class="toggle-btn on" id="overlay-toggle" onclick="toggleOverlay()">
         <div class="toggle-dot"></div><span id="toggle-label">Show Boxes</span>
       </button>
-      
+      <div class="jump-wrap">
+        <span class="jump-label">Go to #</span>
+        <input class="jump-input" id="jump-input" type="number" min="1" placeholder="1">
+        <button class="nav-btn" onclick="jumpTo()">Go</button>
+      </div>
     </div>
 
     <div class="pagination" id="pagination"></div>
